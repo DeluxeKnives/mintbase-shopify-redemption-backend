@@ -12,6 +12,6 @@ POST http://localhost:3003/redemption/redeemMirror
 Content-Type: application/json
 
 {
-    "id": "634cc9d5a7fd1882959f08c9",
+    "id": "634cd9934e57a674636020e4",
     "nftID": 0
 }
