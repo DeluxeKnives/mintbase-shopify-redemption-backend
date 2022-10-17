@@ -5,11 +5,13 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "ngrok": "ngrok http 3000",
     "start": "nodemon server.js"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@shopify/shopify-api": "^5.2.0",
     "express": "^4.18.2",
     "mongoose": "^6.6.5",
     "uuid": "^9.0.0"

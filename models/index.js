@@ -21,6 +21,10 @@ const redemptionSchema = mongoose.Schema({
         type: Number,
         required: true
     },
+    redemptionCode: {
+        type: String,
+        required: false
+    },
     redeemedDate: {
         type: Date,
         required: false

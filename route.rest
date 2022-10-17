@@ -1,1 +1,17 @@
+### Check if NFT 0 has been redeemed
+
 GET http://localhost:3003/redemption/check/0
+
+### Creates and returns a nonce for NFT 0
+
+GET http://localhost:3003/redemption/getNonce/0
+
+### Attempts redemption
+
+POST http://localhost:3003/redemption/redeemMirror
+Content-Type: application/json
+
+{
+    "id": "634cc9d5a7fd1882959f08c9",
+    "nftID": 0
+}
