@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { json, Router } from "express";
 import { Nonce, Redemption } from '../models/index.js';
 import { v4 } from 'uuid';
 import axios from 'axios';
@@ -73,25 +73,26 @@ router.post('/redeemMirror', async (req, res) => {
     // TODO: delete user nonces
 
     // Generate code via shopify
-    const priceRuleId = 507328175; // TODO: generate correct price rule from mintbase info
     const redemptionCode = "NFT-" + v4().slice(0, 15)
     try {
         // Creates a price rule for this specific user
         let shopifyRes = await axios.post(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules.json`, 
             {
-                'title': redemptionCode,
-                "value_type":"percentage",
-                "value":"-100.0",
-                "customer_selection":"all",
-                "target_type":"line_item",
-                "target_selection":"entitled",
-                "allocation_method":"each",
-                "starts_at":"2018-03-22T00:00:00-00:00",
-                "entitled_product_ids":[4670662017099], // TODO: get from mintbase info
-                "allocation_limit": 1,
-                "once_per_customer": true,
-                "usage_limit": 1
+                "price_rule": {
+                    "allocation_method":"each",
+                    "customer_selection":"all",
+                    'title': redemptionCode,
+                    "value_type":"percentage",
+                    "value":"-100.0",
+                    "target_type":"line_item",
+                    "target_selection":"entitled",
+                    "starts_at":"2018-03-22T00:00:00-00:00",
+                    "entitled_product_ids":[4670662017099], // TODO: get from mintbase info
+                    "allocation_limit": 1,
+                    "once_per_customer": true,
+                    "usage_limit": 1
+                }
             },
             {
                 headers: {
@@ -100,13 +101,18 @@ router.post('/redeemMirror', async (req, res) => {
                 }
             }
         );
-        console.log(shopifyRes);
+        console.log(shopifyRes.data.price_rule.id);
+
+        // TODO: generate correct price rule from mintbase info
+        const priceRuleId = shopifyRes.data.price_rule.id;
 
         // Creates a discount code
         shopifyRes = await axios.post(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules/${priceRuleId}/discount_codes.json`, 
             {
-                'discount_codes': [{ 'code': redemptionCode }]
+                'discount_code': { 
+                    'code': redemptionCode 
+                }
             },
             {
                 headers: {
@@ -139,7 +145,7 @@ router.post('/redeemMirror', async (req, res) => {
     // Return
     res.status(201).json({
         succcess: true,
-        redemptionCode: discount_code.code
+        redemptionCode
     });
 });
 
