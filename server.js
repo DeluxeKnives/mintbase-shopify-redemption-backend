@@ -2,12 +2,19 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { config } from 'dotenv';
 import redemptionRouter from './routes/redemption.js';
+import cors from 'cors';
 
 config();
 const app = express();
+
+// Database
 mongoose.connect(process.env.DATABASE_URL);
 const db = mongoose.connection;
 
+// Cors
+app.use(cors({ origin: "*" }));
+
+// Start server
 app.listen(3003, () => console.log("Server started"));
 db.on('error', (error) => console.log(error));
 db.once('open', () => console.log("Connected to database."));

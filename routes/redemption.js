@@ -2,6 +2,9 @@ import { json, Router } from "express";
 import { Nonce, Redemption } from '../models/index.js';
 import { v4 } from 'uuid';
 import axios from 'axios';
+import sanitizer from 'express-autosanitizer';
+import nearApi from "near-api-js";
+import { sha256 } from "js-sha256";
 
 const router = Router();
 
@@ -41,14 +44,52 @@ router.get('/getNonce/:nftID', async (req, res) => {
 });
 
 // Redeem
-router.post('/redeemMirror', async (req, res) => {
+router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // Get data
     const id = req.body.id;
     const nftID = req.body.nftID;
-    if (id == null || nftID == null) {
+    const accountId = req.body.accountId;
+    const password = req.body.password;
+    let { signature, publicKey } = password;
+    signature = Uint8Array.from(Object.values(signature))
+    publicKey = Uint8Array.from(Object.values(publicKey.data))
+
+    if (id == null || signature == null || publicKey == null || nftID == null || accountId == null) {
         res.status(400).json("Incorrect ID!");
         return;
     }
+
+    // Get sign data from rpc
+    const { data } = await axios({
+        method: 'post',
+        url: 'https://rpc.testnet.near.org',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        data: `{"jsonrpc":"2.0", "method":"query",
+                "params":["access_key/${accountId}", ""], "id":1}`
+    });
+    if (!data || !data.result || !data.result.keys) {
+        res.status(400).json("No data for accountId found!");
+        return;
+    }
+
+    for (const k in data.result.keys) {
+        const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(data.result.keys[k].public_key);
+        const verification = rpcPublicKey.verify(Uint8Array.from("BADASS MESSAGE"), signature);
+        console.log("PUBLIC KEY:", data.result.keys[k].public_key, verification);
+    }
+
+
+
+    // Check that nonce is right, & delete all nonces of user
+    const nonce = await Nonce.findById(id);
+    const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
+    if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
+        res.status(400).json(data);
+        return;
+    }
+    // TODO: delete user nonces
+
+
 
     // Check for redemption
     let redeemed = false;
@@ -63,32 +104,23 @@ router.post('/redeemMirror', async (req, res) => {
         return;
     }
 
-    // Check that nonce is right, & delete all nonces of user
-    const nonce = await Nonce.findById(id);
-    const getAnnouncement = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
-    if (false ) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
-        res.status(400).json("Nonce not announced properly!");
-        return;
-    }
-    // TODO: delete user nonces
-
     // Generate code via shopify
     const redemptionCode = "NFT-" + v4().slice(0, 15)
     try {
         // Creates a price rule for this specific user
         let shopifyRes = await axios.post(
-            `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules.json`, 
+            `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules.json`,
             {
                 "price_rule": {
-                    "allocation_method":"each",
-                    "customer_selection":"all",
+                    "allocation_method": "each",
+                    "customer_selection": "all",
                     'title': redemptionCode,
-                    "value_type":"percentage",
-                    "value":"-100.0",
-                    "target_type":"line_item",
-                    "target_selection":"entitled",
-                    "starts_at":"2018-03-22T00:00:00-00:00",
-                    "entitled_product_ids":[4670662017099], // TODO: get from mintbase info
+                    "value_type": "percentage",
+                    "value": "-100.0",
+                    "target_type": "line_item",
+                    "target_selection": "entitled",
+                    "starts_at": "2018-03-22T00:00:00-00:00",
+                    "entitled_product_ids": [4670662017099], // TODO: get from mintbase info
                     "allocation_limit": 1,
                     "once_per_customer": true,
                     "usage_limit": 1
@@ -108,10 +140,10 @@ router.post('/redeemMirror', async (req, res) => {
 
         // Creates a discount code
         shopifyRes = await axios.post(
-            `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules/${priceRuleId}/discount_codes.json`, 
+            `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules/${priceRuleId}/discount_codes.json`,
             {
-                'discount_code': { 
-                    'code': redemptionCode 
+                'discount_code': {
+                    'code': redemptionCode
                 }
             },
             {
