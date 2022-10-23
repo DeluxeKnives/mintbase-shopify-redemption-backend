@@ -72,6 +72,9 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         return;
     }
 
+    console.log(signature);
+    console.log(publicKey);
+
     for (const k in data.result.keys) {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(data.result.keys[k].public_key);
         const verification = rpcPublicKey.verify(Uint8Array.from("BADASS MESSAGE"), signature);
@@ -81,6 +84,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
 
 
     // Check that nonce is right, & delete all nonces of user
+    /*
     const nonce = await Nonce.findById(id);
     const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
     if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
@@ -103,24 +107,39 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         res.status(400).json("NFT already redeemed!");
         return;
     }
+    */
 
     // Generate code via shopify
     const redemptionCode = "NFT-" + v4().slice(0, 15)
+    const productId = 4483561226315; // TODO: get from mintbase info
     try {
+
+        let productRes = await axios.get(
+            `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/products/${productId}.json`,
+            {
+                headers: {
+                    'X-Shopify-Access-Token': process.env.SHOPIFY_ACCESS_CODE,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        const price = parseFloat(productRes.data.product.variants[0].price);
+
         // Creates a price rule for this specific user
         let shopifyRes = await axios.post(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules.json`,
             {
                 "price_rule": {
-                    "allocation_method": "each",
+                    "allocation_method": "across",
                     "customer_selection": "all",
                     'title': redemptionCode,
-                    "value_type": "percentage",
-                    "value": "-100.0",
+                    "value_type": "fixed_amount",
+                    "value": -price,
                     "target_type": "line_item",
                     "target_selection": "entitled",
                     "starts_at": "2018-03-22T00:00:00-00:00",
-                    "entitled_product_ids": [4670662017099], // TODO: get from mintbase info
+                    "entitled_product_ids": [productId], 
                     "allocation_limit": 1,
                     "once_per_customer": true,
                     "usage_limit": 1
@@ -180,6 +199,21 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         redemptionCode
     });
 });
+
+/*
+async function verifySignature(nonce, accountId) {
+    const keyPair = await keyStore.getKey(process.env.NEAR_NETWORK, accountId);
+    const msg = Buffer.from(nonce);
+
+    const { signature } = keyPair.sign(msg);
+
+    const isValid = keyPair.verify(msg, signature);
+
+    console.log("Signature Valid?:", isValid);
+
+    return isValid
+}
+*/
 
 // Get redemption code
 
