@@ -75,11 +75,14 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     console.log(signature);
     console.log(publicKey);
 
+    // Check for the keys
+    /*
     for (const k in data.result.keys) {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(data.result.keys[k].public_key);
         const verification = rpcPublicKey.verify(Uint8Array.from("BADASS MESSAGE"), signature);
         console.log("PUBLIC KEY:", data.result.keys[k].public_key, verification);
     }
+    */
 
 
 
@@ -108,6 +111,33 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         return;
     }
     */
+
+    // Doesn't work yet >=(
+    const mintbaseRes = await axios.post(
+        `https://interop-${process.env.NEAR_NETWORK}.hasura.app/v1/graphql`,
+        { 
+            query: 
+            `query { 
+                 mb_views_nft_tokens(
+                    where: { token_id: { _eq: "${nftID}" }, nft_contract_id: { _eq: "${process.env.MINTBASE_SHOP}" } }
+                    offset: 0
+                 )
+                 {
+                  token_id
+                  reference_blob
+                 }
+            }` 
+        },
+        {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        }
+    );
+    console.log(mintbaseRes.data);
+    console.log(mintbaseRes.data.data.mb_views_nft_tokens);
+
+    return;
 
     // Generate code via shopify
     const redemptionCode = "NFT-" + v4().slice(0, 15)
@@ -139,7 +169,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                     "target_type": "line_item",
                     "target_selection": "entitled",
                     "starts_at": "2018-03-22T00:00:00-00:00",
-                    "entitled_product_ids": [productId], 
+                    "entitled_product_ids": [productId],
                     "allocation_limit": 1,
                     "once_per_customer": true,
                     "usage_limit": 1
