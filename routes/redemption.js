@@ -5,6 +5,7 @@ import axios from 'axios';
 import sanitizer from 'express-autosanitizer';
 import nearApi from "near-api-js";
 import { sha256 } from "js-sha256";
+import { connection } from "../server.js";
 
 const router = Router();
 
@@ -60,40 +61,41 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     }
 
     // Get sign data from rpc
-    const { data } = await axios({
-        method: 'post',
-        url: 'https://rpc.testnet.near.org',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        data: `{"jsonrpc":"2.0", "method":"query",
-                "params":["access_key/${accountId}", ""], "id":1}`
-    });
-    if (!data || !data.result || !data.result.keys) {
+    // https://github.com/near/near-api-js/blob/7f16b10ece3c900aebcedf6ebc660cc9e604a242/packages/near-api-js/src/account.ts#L541
+    const nearAccount = await connection.account(accountId);
+    const accessKeys = await nearAccount.getAccessKeys();
+
+    if (!accessKeys || !accessKeys.length <= 0 .result) {
         res.status(400).json("No data for accountId found!");
         return;
     }
 
-    console.log(signature);
-    console.log(publicKey);
-
     // Check for the keys
-    /*
-    for (const k in data.result.keys) {
-        const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(data.result.keys[k].public_key);
-        const verification = rpcPublicKey.verify(Uint8Array.from("BADASS MESSAGE"), signature);
-        console.log("PUBLIC KEY:", data.result.keys[k].public_key, verification);
+    let verification = false;
+    for (const k in accessKeys) {
+        const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(accessKeys[k].public_key);
+        const v = rpcPublicKey.verify(new Uint8Array(sha256.array("123456789")), signature);
+
+        if(v) {
+            verification = v;
+            console.log(accountId + " verified with public key:", accessKeys[k].public_key);
+            break;
+        }
     }
-    */
-
-
-
-    // Check that nonce is right, & delete all nonces of user
-    /*
-    const nonce = await Nonce.findById(id);
-    const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
-    if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
-        res.status(400).json(data);
+    if(!verification) {
+        console.log("ERROR!")
+        res.status(403).json("Incorrect signature!");
         return;
     }
+
+    // Check that nonce is right, & delete all nonces of user
+    
+    // const nonce = await Nonce.findById(id);
+    // const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
+    // if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
+    //     res.status(400).json(accountId);
+    //     return;
+    // }
     // TODO: delete user nonces
 
 
@@ -110,9 +112,9 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         res.status(400).json("NFT already redeemed!");
         return;
     }
-    */
+    
 
-    // Doesn't work yet >=(
+    // Query data from Mintbase
     const mintbaseRes = await axios.post(
         `https://interop-${process.env.NEAR_NETWORK}.hasura.app/v1/graphql`,
         { 

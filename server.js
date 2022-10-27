@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { config } from 'dotenv';
 import redemptionRouter from './routes/redemption.js';
 import cors from 'cors';
+import nearAPI from 'near-api-js';
+
 
 config();
 const app = express();
@@ -21,3 +23,16 @@ db.once('open', () => console.log("Connected to database."));
 
 app.use(express.json());
 app.use("/redemption", redemptionRouter);
+
+// NEAR
+const { connect, keyStores } = nearAPI;
+const testnetAddition = process.env.NEAR_NETWORK === 'testnet' ? '.testnet' : '';
+const connectionConfig = {
+    networkId: process.env.NEAR_NETWORK,
+    keyStore: new keyStores.InMemoryKeyStore(),
+    nodeUrl: `https://rpc${testnetAddition}.near.org`,
+    walletUrl: `https://wallet${testnetAddition}.near.org`,
+    helperUrl: `https://helper${testnetAddition}.near.org`,
+    explorerUrl: `https://explorer${testnetAddition}.near.org`,
+};
+export const connection = await connect(connectionConfig);
