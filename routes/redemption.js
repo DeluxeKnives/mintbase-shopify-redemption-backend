@@ -40,7 +40,7 @@ router.get('/checkBatch/:nftIDs', async (req, res) => {
 
     const status = {};
     for (const id of nftIds) {
-        if (isNaN(id) || id < 0) { 
+        if (isNaN(id) || id < 0) {
             res.status(400).json("Incorrect ID!");
             return;
         }
@@ -84,73 +84,54 @@ router.get('/getNonce/:nftID', async (req, res) => {
 router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // Get data
     const nonceId = req.body.id;
-    const nftID = req.body.nftID;
+    const nftID = parseInt(req.body.nftID);
     const accountId = req.body.accountId;
-    const password = req.body.password;
-    let { signature, publicKey } = password;
+    const signature = req.body.signature;
     signature = Uint8Array.from(Object.values(signature))
     publicKey = Uint8Array.from(Object.values(publicKey.data))
 
-    if (nonceId == null || signature == null || publicKey == null || nftID == null || accountId == null) {
+    // Validate that data was sent properly
+    if (nonceId == null || signature == null || nftID < 0 || isNaN(nftID) || accountId == null) {
         res.status(400).json("Incorrect ID!");
         return;
     }
 
-    // Get sign data from rpc
+    // Get access keys from NEAR RPC to check sign against.
     // https://github.com/near/near-api-js/blob/7f16b10ece3c900aebcedf6ebc660cc9e604a242/packages/near-api-js/src/account.ts#L541
     const nearAccount = await connection.account(accountId);
     const accessKeys = await nearAccount.getAccessKeys();
-
     if (!accessKeys || !accessKeys.length <= 0) {
         res.status(400).json("No data for accountId found!");
         return;
     }
 
-    // Check for the keys
+    // Check that nonce exists, & delete all nonces of user
+    const nonce = await Nonce.findById(nonceId);
+    console.log("NONCE", nonce);
+    if (nonce == null || nonce.date < Date.now() - 1000 * 60 * 24) {
+        res.status(400).json("Invalid nonceId!");
+        return;
+    }
+    // TODO: delete user nonces
+
+    // Check against every access key to ensure that the message signed is the nonce.
     let verification = false;
     for (const k in accessKeys) {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(accessKeys[k].public_key);
-        const v = rpcPublicKey.verify(new Uint8Array(sha256.array("123456789")), signature);
+        const v = rpcPublicKey.verify(new Uint8Array(nonce.nonce), signature);
 
         if (v) {
-            verification = v;
+            verification = true;
             console.log(accountId + " verified with public key:", accessKeys[k].public_key);
             break;
         }
     }
     if (!verification) {
-        console.log("ERROR!")
         res.status(403).json("Incorrect signature!");
         return;
     }
 
-    // Check that nonce is right, & delete all nonces of user
-
-    const nonce = await Nonce.findById(nonceId);
-    const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
-    if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
-        res.status(400).json(accountId);
-        return;
-    }
-    // TODO: delete user nonces
-
-
-
-    // Check for redemption
-    let redeemed = false;
-    try {
-        const redemption = await Redemption.find({ $where: `this.nftID==${nftID}` });
-    }
-    catch (err) {
-        redeemed = false;
-    }
-    if (redeemed) {
-        res.status(400).json("NFT already redeemed!");
-        return;
-    }
-
-
-    // Query data from Mintbase
+    // Query data from Mintbase, including the nft owner.
     const mintbaseRes = await axios.post(
         `https://interop-${process.env.NEAR_NETWORK}.hasura.app/v1/graphql`,
         {
@@ -162,6 +143,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                  )
                  {
                   token_id
+                  owner
                   reference_blob
                  }
             }`
@@ -172,16 +154,45 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
             },
         }
     );
-    console.log(mintbaseRes.data);
-    console.log(mintbaseRes.data.data.mb_views_nft_tokens);
+    const mintbaseData = mintbaseRes.data.data.mb_views_nft_tokens;
+    if(mintbaseData.length != 1) {
+        console.log("MINTBASE DATA:", mintbaseData);
+        res.status(400).json("Token error!");
+        return;
+    }
+    else if(mintbaseData[0].owner !== accountId) {
+        res.status(403).json("User does not own NFT!");
+        return;
+    }
 
-    return;
+    /*----------------------------------USER IS NOW AUTHENTICATED-----------------------------------*/
 
-    // Generate code via shopify
-    const redemptionCode = "NFT-" + v4().slice(0, 15)
-    const productId = 4483561226315; // TODO: get from mintbase info
+    // Check if the code has already been redeemed
+    let redeemed = false;
     try {
+        const redemption = await Redemption.find({ nftId: nftID });
+        if(redemption[0].redeemed) {
+            res.status(200).json({ redemptionCode });
+            return;
+        }
+    }
+    catch (err) {
+        // This is expected if it doesn't exist yet
+    }
 
+    // Generate redemption code + retrieve product ID
+    const redemptionCode = "NFT-" + v4().slice(0, 15)
+    const productId = parseInt(
+        mintbaseData?.[0]?.reference_blob?.extra
+        .find(x => x.trait_type == 'shopify_productId')
+        ?.value);
+    if(isNaN(productId)) {
+        res.status(500).json("Token productId error!");
+        return;
+    }
+        
+    // Do shopify API calls
+    try {
         let productRes = await axios.get(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/products/${productId}.json`,
             {
@@ -220,9 +231,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                 }
             }
         );
-        console.log(shopifyRes.data.price_rule.id);
 
-        // TODO: generate correct price rule from mintbase info
         const priceRuleId = shopifyRes.data.price_rule.id;
 
         // Creates a discount code
@@ -243,7 +252,9 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         console.log(shopifyRes);
     }
     catch (err) {
-        res.status(500).json(err);
+        const code = v4();
+        console.log("SHOPIFY ERROR " + code, err);
+        res.status(500).json("Shopify error: " + code);
         return;
     }
 
@@ -283,24 +294,5 @@ router.get('/setRedeemed/:nftID', async (req, res) => {
 
     res.status(200).json(obj);
 });
-
-
-/*
-async function verifySignature(nonce, accountId) {
-    const keyPair = await keyStore.getKey(process.env.NEAR_NETWORK, accountId);
-    const msg = Buffer.from(nonce);
-
-    const { signature } = keyPair.sign(msg);
-
-    const isValid = keyPair.verify(msg, signature);
-
-    console.log("Signature Valid?:", isValid);
-
-    return isValid
-}
-*/
-
-// Get redemption code
-
 
 export default router;
