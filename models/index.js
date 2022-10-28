@@ -8,6 +8,10 @@ const nonceSchema = mongoose.Schema({
     nftId: {
         type: Number,
         required: true
+    },
+    date: {
+        type: Number,
+        required: true
     }
 });
 

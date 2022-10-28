@@ -1,6 +1,15 @@
 ### Check if NFT 0 has been redeemed
 
-GET http://localhost:3003/redemption/check/0
+GET http://localhost:3003/redemption/check/6
+
+### Check if NFTs have been redeemed
+
+GET http://localhost:3003/redemption/checkBatch/0,2,3,5,6
+
+### Creates a redemption for testing purposes
+
+GET http://localhost:3003/redemption/setRedeemed/2
+
 
 ### Creates and returns a nonce for NFT 0
 

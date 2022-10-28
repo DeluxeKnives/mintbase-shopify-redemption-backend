@@ -15,16 +15,52 @@ router.get('/check/:nftID', async (req, res) => {
     if (isNaN(nftID) || nftID < 0) res.status(400).json("Incorrect ID!");
     else {
         try {
-            const redemption = await Redemption.find({ $where: `this.nftID==${nftID}` });
-            res.status(200).json(redemption.get(redeemed));
+            const redemption = await Redemption.find({ nftId: nftID });
+            console.log(redemption);
+            res.status(200).json(redemption[0].redeemed);
         }
         catch (err) {
+            console.log(err);
             res.status(200).json(false);
         }
     }
 });
 
-// Creates a Nonce, doesn't overwrite a previous one
+// Returns a dictionary of nftIDs to booleans. Submit nftIDs like 0,1,2,5,10
+router.get('/checkBatch/:nftIDs', async (req, res) => {
+    const nftIdStr = req.params.nftIDs;
+    const input = nftIdStr.split(",");
+
+    const nftIds = [];
+    input.forEach(i => {
+        nftIds.push(parseInt(i));
+    });
+
+    console.log(input);
+
+    const status = {};
+    for (const id of nftIds) {
+        if (isNaN(id) || id < 0) { 
+            res.status(400).json("Incorrect ID!");
+            return;
+        }
+        else status[id] = false;
+    }
+
+    try {
+        const redemption = await Redemption.find({ nftId: nftIds });
+        for (const obj of redemption) {
+            status[obj.nftId] = obj.redeemed;
+        }
+        res.status(200).json(status);
+    }
+    catch (err) {
+        console.log(err);
+        res.status(400).json(false);
+    }
+});
+
+// Creates a Nonce for a specific NFT ID; doesn't overwrite a previous one
 router.get('/getNonce/:nftID', async (req, res) => {
     // Ensures that nftID is right
     const nftID = parseInt(req.params.nftID);
@@ -32,7 +68,7 @@ router.get('/getNonce/:nftID', async (req, res) => {
 
     // Generate nonce
     const nonce = v4();
-    const nonceObj = new Nonce({ nonce, nftId: nftID });
+    const nonceObj = new Nonce({ nonce, nftId: nftID, date: Date.now() });
 
     // Writes to database
     try {
@@ -47,7 +83,7 @@ router.get('/getNonce/:nftID', async (req, res) => {
 // Redeem
 router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // Get data
-    const id = req.body.id;
+    const nonceId = req.body.id;
     const nftID = req.body.nftID;
     const accountId = req.body.accountId;
     const password = req.body.password;
@@ -55,7 +91,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     signature = Uint8Array.from(Object.values(signature))
     publicKey = Uint8Array.from(Object.values(publicKey.data))
 
-    if (id == null || signature == null || publicKey == null || nftID == null || accountId == null) {
+    if (nonceId == null || signature == null || publicKey == null || nftID == null || accountId == null) {
         res.status(400).json("Incorrect ID!");
         return;
     }
@@ -65,7 +101,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     const nearAccount = await connection.account(accountId);
     const accessKeys = await nearAccount.getAccessKeys();
 
-    if (!accessKeys || !accessKeys.length <= 0 .result) {
+    if (!accessKeys || !accessKeys.length <= 0) {
         res.status(400).json("No data for accountId found!");
         return;
     }
@@ -76,26 +112,26 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(accessKeys[k].public_key);
         const v = rpcPublicKey.verify(new Uint8Array(sha256.array("123456789")), signature);
 
-        if(v) {
+        if (v) {
             verification = v;
             console.log(accountId + " verified with public key:", accessKeys[k].public_key);
             break;
         }
     }
-    if(!verification) {
+    if (!verification) {
         console.log("ERROR!")
         res.status(403).json("Incorrect signature!");
         return;
     }
 
     // Check that nonce is right, & delete all nonces of user
-    
-    // const nonce = await Nonce.findById(id);
-    // const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
-    // if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
-    //     res.status(400).json(accountId);
-    //     return;
-    // }
+
+    const nonce = await Nonce.findById(nonceId);
+    const getSignedData = "GET ANNOUNCEMENT FROM NEAR BLOCKCHAIN";
+    if (true) {//nonce.nonce != getAnnouncement) { //TODO: GET ANNOUNCEMENT
+        res.status(400).json(accountId);
+        return;
+    }
     // TODO: delete user nonces
 
 
@@ -112,14 +148,14 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         res.status(400).json("NFT already redeemed!");
         return;
     }
-    
+
 
     // Query data from Mintbase
     const mintbaseRes = await axios.post(
         `https://interop-${process.env.NEAR_NETWORK}.hasura.app/v1/graphql`,
-        { 
-            query: 
-            `query { 
+        {
+            query:
+                `query { 
                  mb_views_nft_tokens(
                     where: { token_id: { _eq: "${nftID}" }, nft_contract_id: { _eq: "${process.env.MINTBASE_SHOP}" } }
                     offset: 0
@@ -128,7 +164,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                   token_id
                   reference_blob
                  }
-            }` 
+            }`
         },
         {
             headers: {
@@ -231,6 +267,23 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         redemptionCode
     });
 });
+
+
+// DELETE LATER, FOR TESTING PURPOSES ONLY
+router.get('/setRedeemed/:nftID', async (req, res) => {
+    const nftId = parseInt(req.params.nftID);
+    const obj = new Redemption({
+        redeemed: true,
+        nftId,
+        redemptionCode: "XXX-XXX-XXX",
+        redeemedDate: Date.now()
+    });
+
+    await obj.save();
+
+    res.status(200).json(obj);
+});
+
 
 /*
 async function verifySignature(nonce, accountId) {
