@@ -6,6 +6,7 @@ import sanitizer from 'express-autosanitizer';
 import nearApi from "near-api-js";
 import { sha256 } from "js-sha256";
 import { connection } from "../server.js";
+import { db } from "../server.js";
 
 const router = Router();
 
@@ -61,14 +62,14 @@ router.get('/checkBatch/:nftIDs', async (req, res) => {
 });
 
 // Creates a Nonce for a specific NFT ID; doesn't overwrite a previous one
-router.get('/getNonce/:nftID', async (req, res) => {
+router.get('/getNonce/:account', async (req, res) => {
     // Ensures that nftID is right
-    const nftID = parseInt(req.params.nftID);
-    if (isNaN(nftID) || nftID < 0) res.status(400).json("Incorrect ID!");
+    const account = req.params.account;
+    if (account == null) res.status(400).json("No account provided!");
 
     // Generate nonce
     const nonce = v4();
-    const nonceObj = new Nonce({ nonce, nftId: nftID, date: Date.now() });
+    const nonceObj = new Nonce({ nonce, account, date: Date.now() });
 
     // Writes to database
     try {
@@ -86,9 +87,10 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     const nonceId = req.body.id;
     const nftID = parseInt(req.body.nftID);
     const accountId = req.body.accountId;
-    const signature = req.body.signature;
-    signature = Uint8Array.from(Object.values(signature))
-    publicKey = Uint8Array.from(Object.values(publicKey.data))
+    const password = req.body.password;
+    let { signature } = password;
+    signature = Uint8Array.from(Object.values(signature));
+    console.log(accountId, signature);
 
     // Validate that data was sent properly
     if (nonceId == null || signature == null || nftID < 0 || isNaN(nftID) || accountId == null) {
@@ -100,15 +102,15 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // https://github.com/near/near-api-js/blob/7f16b10ece3c900aebcedf6ebc660cc9e604a242/packages/near-api-js/src/account.ts#L541
     const nearAccount = await connection.account(accountId);
     const accessKeys = await nearAccount.getAccessKeys();
-    if (!accessKeys || !accessKeys.length <= 0) {
+    if (!accessKeys || accessKeys.length <= 0) {
         res.status(400).json("No data for accountId found!");
         return;
     }
 
     // Check that nonce exists, & delete all nonces of user
     const nonce = await Nonce.findById(nonceId);
-    console.log("NONCE", nonce);
-    if (nonce == null || nonce.date < Date.now() - 1000 * 60 * 24) {
+    if (nonce == null || nonce.date < Date.now() - 1000 * 60 * 2 || nonce.account != accountId) {
+        console.log("NONCE", nonce);
         res.status(400).json("Invalid nonceId!");
         return;
     }
@@ -118,7 +120,8 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     let verification = false;
     for (const k in accessKeys) {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(accessKeys[k].public_key);
-        const v = rpcPublicKey.verify(new Uint8Array(nonce.nonce), signature);
+        const v = rpcPublicKey.verify(new Uint8Array(sha256.array(nonce.nonce)), signature);
+        console.log("PK", accessKeys[k].public_key, v);
 
         if (v) {
             verification = true;
@@ -155,42 +158,91 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         }
     );
     const mintbaseData = mintbaseRes.data.data.mb_views_nft_tokens;
-    if(mintbaseData.length != 1) {
-        console.log("MINTBASE DATA:", mintbaseData);
+    if (mintbaseData.length != 1) {
+        console.log("TOKEN ERROR, MINTBASE DATA:", mintbaseData);
         res.status(400).json("Token error!");
         return;
     }
-    else if(mintbaseData[0].owner !== accountId) {
+    else if (mintbaseData[0].owner !== accountId) {
         res.status(403).json("User does not own NFT!");
         return;
     }
 
     /*----------------------------------USER IS NOW AUTHENTICATED-----------------------------------*/
 
+    // Start a session to stop a race condition 
+    const session = await db.startSession();
+    const transactionOpts = {
+        readPreference: 'primary',
+        readConcern: { level: 'local' },
+        writeConcern: { w: 'majority' }
+    };
+
     // Check if the code has already been redeemed
-    let redeemed = false;
+    let redemptionDoc = null;
     try {
-        const redemption = await Redemption.find({ nftId: nftID });
-        if(redemption[0].redeemed) {
-            res.status(200).json({ redemptionCode });
+        let existingRedemptionCode = null;
+        const transactionResults = session.withTransaction(async () => {
+            // Tries to find a redemption to query
+            redemptionDoc = (await Redemption.find({ nftId: nftID }, { session }))[0];
+            console.log("EXISTING REDEMPTION QUERY:", redemptionDoc);
+
+            // If already redeemed, the code must already exist or be in the process of being generated.
+            if (redemptionDoc != null && redemptionDoc.redeemed) {
+                existingRedemptionCode = redemptionDoc.redemptionCode;
+                await session.abortTransaction();
+                console.log("SESSION ABORTED: GENERATED CODE EXISTS OR IS IN PROGRESS OF BEING GENERATED");
+                return;
+            }
+        
+            // Add a redemption document
+            if (redemptionDoc == null) {
+                // Create placeholder to stop a race condition
+                redemptionDoc = new Redemption({
+                    redemptionCode: "",
+                    nftId: nftID,
+                    redeemed: true,
+                    redeemedDate: Date.now()
+                }, null, { session });
+                await redemptionDoc.save();
+            }
+
+            // Check to ensure that there aren't multiple redemptions of the same type
+            const redemptionsOfID = await Redemption.find({ nftId: nftID }, { session });
+            console.log("REDEMPTIONS OF ID CHECK:", redemptionsOfID);
+            if(redemptionsOfID.length > 1) {
+                await session.abortTransaction();
+                existingRedemptionCode = "";
+                console.log("SESSION ABORTED: MULTIPLE ID REDEMPTIONS FOUND");
+                return;
+            }
+        }, transactionOpts);
+
+        if (existingRedemptionCode != null) {
+            res.status(200).json({ redemptionCode: existingRedemptionCode });
             return;
         }
     }
-    catch (err) {
-        // This is expected if it doesn't exist yet
+    catch (e) {
+        console.log(e);
+        res.status(500).json(e);
+        await session.endSession();
+        return;
     }
+    await session.endSession();
+
 
     // Generate redemption code + retrieve product ID
-    const redemptionCode = "NFT-" + v4().slice(0, 15)
+    const redemptionCode = "NFT-" + v4().slice(0, 16)
     const productId = parseInt(
         mintbaseData?.[0]?.reference_blob?.extra
-        .find(x => x.trait_type == 'shopify_productId')
-        ?.value);
-    if(isNaN(productId)) {
+            .find(x => x.trait_type == 'shopify_productId')
+            ?.value);
+    if (isNaN(productId)) {
         res.status(500).json("Token productId error!");
         return;
     }
-        
+
     // Do shopify API calls
     try {
         let productRes = await axios.get(
@@ -255,18 +307,15 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         const code = v4();
         console.log("SHOPIFY ERROR " + code, err);
         res.status(500).json("Shopify error: " + code);
+
+        // Attempt to update so that the code isn't null
+        await redemptionDoc.updateOne({ redeemed: false });
         return;
     }
 
     // Set in db what the code was & that it was redeemed
     try {
-        const redemption = new Redemption({
-            redemptionCode,
-            nftId: nftID,
-            redeemed: true,
-            redeemedDate: Date.now()
-        });
-        redemption.save();
+        // TODO: replace with update
     }
     catch {
         res.status(500).json(err);

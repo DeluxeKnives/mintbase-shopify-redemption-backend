@@ -5,8 +5,8 @@ const nonceSchema = mongoose.Schema({
         type: String,
         required: true
     },
-    nftId: {
-        type: Number,
+    account: {
+        type: String,
         required: true
     },
     date: {
