@@ -29,6 +29,10 @@ const redemptionSchema = mongoose.Schema({
         type: String,
         required: false
     },
+    checkoutLink: {
+        type: String,
+        required: false
+    },
     redeemedDate: {
         type: Date,
         required: false

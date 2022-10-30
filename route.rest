@@ -1,6 +1,6 @@
 ### Check if NFT 0 has been redeemed
 
-GET http://localhost:3003/redemption/check/6
+GET http://localhost:3003/redemption/check/169
 
 ### Check if NFTs have been redeemed
 

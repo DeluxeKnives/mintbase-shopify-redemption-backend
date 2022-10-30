@@ -37,8 +37,6 @@ router.get('/checkBatch/:nftIDs', async (req, res) => {
         nftIds.push(parseInt(i));
     });
 
-    console.log(input);
-
     const status = {};
     for (const id of nftIds) {
         if (isNaN(id) || id < 0) {
@@ -114,14 +112,13 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         res.status(400).json("Invalid nonceId!");
         return;
     }
-    // TODO: delete user nonces
+    // TODO: delete user nonces. Could replace with a routine that deletes all old nonces
 
     // Check against every access key to ensure that the message signed is the nonce.
     let verification = false;
     for (const k in accessKeys) {
         const rpcPublicKey = nearApi.utils.key_pair.PublicKey.from(accessKeys[k].public_key);
         const v = rpcPublicKey.verify(new Uint8Array(sha256.array(nonce.nonce)), signature);
-        console.log("PK", accessKeys[k].public_key, v);
 
         if (v) {
             verification = true;
@@ -171,6 +168,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     /*----------------------------------USER IS NOW AUTHENTICATED-----------------------------------*/
 
     // Start a session to stop a race condition 
+    console.log("STARTING SESSION")
     const session = await db.startSession();
     const transactionOpts = {
         readPreference: 'primary',
@@ -181,21 +179,24 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // Check if the code has already been redeemed
     let redemptionDoc = null;
     try {
-        let existingRedemptionCode = null;
-        const transactionResults = session.withTransaction(async () => {
+        let existingRedemptionCode = null, existingCheckoutLink = null;
+        console.log("STARTING TRANSACTION");
+        const transactionResults = await session.withTransaction(async () => {
             // Tries to find a redemption to query
-            redemptionDoc = (await Redemption.find({ nftId: nftID }, { session }))[0];
+            redemptionDoc = (await Redemption.find({ nftId: nftID }, null, { session }))[0];
             console.log("EXISTING REDEMPTION QUERY:", redemptionDoc);
 
             // If already redeemed, the code must already exist or be in the process of being generated.
             if (redemptionDoc != null && redemptionDoc.redeemed) {
                 existingRedemptionCode = redemptionDoc.redemptionCode;
+                existingCheckoutLink = redemptionDoc.checkoutLink;
                 await session.abortTransaction();
                 console.log("SESSION ABORTED: GENERATED CODE EXISTS OR IS IN PROGRESS OF BEING GENERATED");
                 return;
             }
-        
+
             // Add a redemption document
+            let redemptionMax = 1;
             if (redemptionDoc == null) {
                 // Create placeholder to stop a race condition
                 redemptionDoc = new Redemption({
@@ -205,12 +206,13 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                     redeemedDate: Date.now()
                 }, null, { session });
                 await redemptionDoc.save();
+                redemptionMax -= 1;
             }
 
             // Check to ensure that there aren't multiple redemptions of the same type
-            const redemptionsOfID = await Redemption.find({ nftId: nftID }, { session });
+            const redemptionsOfID = await Redemption.find({ nftId: nftID }, null, { session });
             console.log("REDEMPTIONS OF ID CHECK:", redemptionsOfID);
-            if(redemptionsOfID.length > 1) {
+            if (redemptionsOfID.length > redemptionMax) {
                 await session.abortTransaction();
                 existingRedemptionCode = "";
                 console.log("SESSION ABORTED: MULTIPLE ID REDEMPTIONS FOUND");
@@ -219,7 +221,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         }, transactionOpts);
 
         if (existingRedemptionCode != null) {
-            res.status(200).json({ redemptionCode: existingRedemptionCode });
+            res.status(200).json({ redemptionCode: existingRedemptionCode, checkoutLink: existingCheckoutLink });
             return;
         }
     }
@@ -232,8 +234,9 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     await session.endSession();
 
 
-    // Generate redemption code + retrieve product ID
-    const redemptionCode = "NFT-" + v4().slice(0, 16)
+    // Generate redemption code + retrieve product ID from mintbase data
+    const redemptionCode = "NFT-" + v4().slice(0, 16);
+    let variantId = "";
     const productId = parseInt(
         mintbaseData?.[0]?.reference_blob?.extra
             .find(x => x.trait_type == 'shopify_productId')
@@ -245,6 +248,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
 
     // Do shopify API calls
     try {
+        console.log(`${nftID}: READING PRODUCT DATA`);
         let productRes = await axios.get(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/products/${productId}.json`,
             {
@@ -256,8 +260,10 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         );
 
         const price = parseFloat(productRes.data.product.variants[0].price);
+        variantId = productRes.data.product.variants[0].id;
 
         // Creates a price rule for this specific user
+        console.log(`${nftID}: GENERATING PRICE RULE`);
         let shopifyRes = await axios.post(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules.json`,
             {
@@ -287,6 +293,7 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
         const priceRuleId = shopifyRes.data.price_rule.id;
 
         // Creates a discount code
+        console.log(`${nftID}: GENERATING DISCOUNT CODE`);
         shopifyRes = await axios.post(
             `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2022-10/price_rules/${priceRuleId}/discount_codes.json`,
             {
@@ -301,21 +308,26 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
                 }
             }
         );
-        console.log(shopifyRes);
     }
     catch (err) {
         const code = v4();
-        console.log("SHOPIFY ERROR " + code, err);
+        console.log(`${nftID}: SHOPIFY ERROR ${code}`, err);
         res.status(500).json("Shopify error: " + code);
 
         // Attempt to update so that the code isn't null
-        await redemptionDoc.updateOne({ redeemed: false });
+        await Redemption.updateOne({ nftID: nftID }, { redeemed: false });
         return;
     }
 
+    // Generate a link to go direct to shopping cart
+    // https://community.shopify.com/c/shopify-design/cart-use-permalinks-to-pre-load-the-cart/td-p/613702
+    const checkoutLink = `https://${process.env.SHOPIFY_DOMAIN}/cart/${variantId}:1/?discount=${redemptionCode}`;
+
     // Set in db what the code was & that it was redeemed
     try {
-        // TODO: replace with update
+        console.log(`${nftID}: SETTING REDEMPTION DOC CODE`);
+        const update = await Redemption.updateOne({ nftId: nftID }, { redemptionCode, checkoutLink });
+        console.log(update);
     }
     catch {
         res.status(500).json(err);
@@ -324,7 +336,8 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     // Return
     res.status(201).json({
         succcess: true,
-        redemptionCode
+        redemptionCode,
+        checkoutLink
     });
 });
 
