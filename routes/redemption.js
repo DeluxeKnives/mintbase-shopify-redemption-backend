@@ -341,20 +341,4 @@ router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     });
 });
 
-
-// DELETE LATER, FOR TESTING PURPOSES ONLY
-router.get('/setRedeemed/:nftID', async (req, res) => {
-    const nftId = parseInt(req.params.nftID);
-    const obj = new Redemption({
-        redeemed: true,
-        nftId,
-        redemptionCode: "XXX-XXX-XXX",
-        redeemedDate: Date.now()
-    });
-
-    await obj.save();
-
-    res.status(200).json(obj);
-});
-
 export default router;
