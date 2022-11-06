@@ -17,7 +17,7 @@ const db = mongoose.connection;
 app.use(cors({ origin: "*" }));
 
 // Start server
-app.listen(3003, () => console.log("Server started"));
+app.listen(8080, () => console.log("Server started. Listening on port 8080."));
 db.on('error', (error) => console.log(error));
 db.once('open', () => console.log("Connected to database."));
 
