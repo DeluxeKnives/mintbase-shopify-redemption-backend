@@ -81,10 +81,7 @@ router.get('/getNonce/:account', async (req, res) => {
 });
 
 // Redeem
-router.post('/redeemMirror', sanitizer.route, async (req, res) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
-    
+router.post('/redeemMirror', sanitizer.route, async (req, res) => {    
     console.log("STARTING REDEEM");
     // Get data
     const nonceId = req.body.id;
