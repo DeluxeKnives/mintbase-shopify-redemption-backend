@@ -61,6 +61,7 @@ router.get('/checkBatch/:nftIDs', async (req, res) => {
 
 // Creates a Nonce for a specific NFT ID; doesn't overwrite a previous one
 router.get('/getNonce/:account', async (req, res) => {
+    console.log('getting nonce');
     // Ensures that nftID is right
     const account = req.params.account;
     if (account == null) res.status(400).json("No account provided!");
@@ -81,6 +82,10 @@ router.get('/getNonce/:account', async (req, res) => {
 
 // Redeem
 router.post('/redeemMirror', sanitizer.route, async (req, res) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+    
+    console.log("STARTING REDEEM");
     // Get data
     const nonceId = req.body.id;
     const nftID = parseInt(req.body.nftID);
