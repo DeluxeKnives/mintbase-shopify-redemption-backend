@@ -36,4 +36,8 @@ const connectionConfig = {
     explorerUrl: `https://explorer${testnetAddition}.near.org`,
 };
 export const connection = await connect(connectionConfig);
+
+console.log(`Connected to NEAR ${process.env.NEAR_NETWORK}`);
+
+
 export { db };
