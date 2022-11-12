@@ -30,9 +30,9 @@ const testnetAddition = process.env.NEAR_NETWORK === 'testnet' ? '.testnet' : ''
 const connectionConfig = {
     networkId: process.env.NEAR_NETWORK,
     keyStore: new keyStores.InMemoryKeyStore(),
-    nodeUrl: `https://rpc${testnetAddition}.near.org`,
+    nodeUrl: `https://rpc.${process.env.NEAR_NETWORK}.near.org`,
     walletUrl: `https://wallet${testnetAddition}.near.org`,
-    helperUrl: `https://helper${testnetAddition}.near.org`,
+    helperUrl: `https://helper.${process.env.NEAR_NETWORK}.near.org`,
     explorerUrl: `https://explorer${testnetAddition}.near.org`,
 };
 export const connection = await connect(connectionConfig);
