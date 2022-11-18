@@ -8,6 +8,10 @@ The discount code generation has the following properties:
 - Can only be used once per person
 - Can only be used by one person
 
+## Documentation
+The most comprehensive documentation can be found in the wiki:
+[https://github.com/DeluxeKnives/mintbase-shopify-redemption-backend/wiki](https://github.com/DeluxeKnives/mintbase-shopify-redemption-backend/wiki)
+
 ## Setup
 1. Run `npm install` to install all dependencies.
 2. Run `npm start` to begin the server.
