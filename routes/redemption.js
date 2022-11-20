@@ -80,17 +80,6 @@ router.get('/getNonce/:account', async (req, res) => {
     }
 });
 
-router.post('/cors', sanitizer.route, async (req, res) => {
-
-    const text = req.body.text;
-
-    // Return
-    res.status(201).json({
-        success: true,
-        text
-    });
-})
-
 // Redeem
 router.post('/redeemMirror', sanitizer.route, async (req, res) => {
     console.log("STARTING REDEEM");
