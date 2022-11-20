@@ -8,12 +8,16 @@ The discount code generation has the following properties:
 - Can only be used once per person
 - Can only be used by one person
 
+## Documentation
+The most comprehensive documentation can be found in the wiki:
+[https://github.com/DeluxeKnives/mintbase-shopify-redemption-backend/wiki](https://github.com/DeluxeKnives/mintbase-shopify-redemption-backend/wiki)
+
 ## Setup
 1. Run `npm install` to install all dependencies.
 2. Run `npm start` to begin the server.
 
 ## Deployment & Use
-This repository depends on MongoDB, Mintbase GraphQL API, and the Shopify API. To get all of these systems working together properly, please follow the GitBook guide.
+This repository depends on MongoDB, Mintbase GraphQL API, and the Shopify API. To get all of these systems working together properly, please follow the [Wiki guide](https://github.com/DeluxeKnives/mintbase-shopify-redemption-backend/wiki).
 
 ## NFT Metadata Setup
 When generating your NFT, it should have the following metadata provided by Mintbase. The only required one is `shopify_productId`, which should be equal to the shopify productId that the NFT correlates to. This system currently does not support the discounting of specific product variants.  
